@@ -12,61 +12,107 @@ const logger = require("firebase-functions/logger");
 
 // functions/index.js
 
-const functions = require('firebase-functions');
-const admin = require('firebase-admin');
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
 admin.initializeApp();
 
 exports.sendNotificationOnUpdate = functions.firestore
-    .document('messages/{messageId}')
-    .onUpdate(async (change, context) => {
-        const newData = change.after.data();
-        const oldData = change.before.data();
+  .document("messages/{messageId}")
+  .onUpdate(async (change, context) => {
+    const newData = change.after.data();
+    const oldData = change.before.data();
 
-        const userIds = newData.userId;
+    const userIds = newData.userId;
 
-        if (userIds && userIds.length > 0) {
-            // Fetch user information from the "users" collection
-            const user1Doc = await admin.firestore().collection('user').doc(userIds[0]).get();
-            const user2Doc = await admin.firestore().collection('user').doc(userIds[1]).get();
+    if (userIds && userIds.length > 0) {
+      // Fetch user information from the "users" collection
+      const user1Doc = await admin
+        .firestore()
+        .collection("user")
+        .doc(userIds[0])
+        .get();
+      const user2Doc = await admin
+        .firestore()
+        .collection("user")
+        .doc(userIds[1])
+        .get();
 
-            // Extract user names
-            const userName1 = user1Doc.exists ? user1Doc.data().name : 'User 1';
-            const userName2 = user2Doc.exists ? user2Doc.data().name : 'User 2';
+      // Extract user names
+      const userName1 = user1Doc.exists ? user1Doc.data().name : "User 1";
+      const userName2 = user2Doc.exists ? user2Doc.data().name : "User 2";
 
-            const topic1 = userIds[0];
-            const topic2 = userIds[1];
+      const topic1 = userIds[0];
+      const topic2 = userIds[1];
 
-            // Check if the "messages" field length has changed
-            if (newData.messages.length > oldData.messages.length) {
-                // Extract the last message from the "messages" field
-                const lastMessage = newData.messages[newData.messages.length - 1];
+      // Check if the "messages" field length has changed
+      if (newData.messages.length > oldData.messages.length) {
+        // Extract the last message from the "messages" field
+        const lastMessage = newData.messages[newData.messages.length - 1];
 
-                const payload1 = {
-                    notification: {
-                        title: userName2,
-                        body: lastMessage.message,
-                    },
-                };
+        const payload1 = {
+          notification: {
+            title: userName2,
+            body: lastMessage.message,
+          },
+        };
 
-                const payload2 = {
-                    notification: {
-                        title: userName1,
-                        body: lastMessage.message,
-                    },
-                };
+        const payload2 = {
+          notification: {
+            title: userName1,
+            body: lastMessage.message,
+          },
+        };
 
-                if (lastMessage.sender === topic1) {
-                    // Send notification to the second topic
-                    await admin.messaging().sendToTopic(topic2, payload2);
-                    console.log(`Notification sent to topic: ${topic2}`);
-                } else {
-                    // Send notification to the first topic
-                    await admin.messaging().sendToTopic(topic1, payload1);
-                    console.log(`Notification sent to topic: ${topic1}`);
-                }
-
-            } else {
-                console.log('No new messages.');
-            }
+        if (lastMessage.sender === topic1) {
+          // Send notification to the second topic
+          await admin.messaging().sendToTopic(topic2, payload2);
+          console.log(`Notification sent to topic: ${topic2}`);
+        } else {
+          // Send notification to the first topic
+          await admin.messaging().sendToTopic(topic1, payload1);
+          console.log(`Notification sent to topic: ${topic1}`);
         }
-    });
+      } else {
+        console.log("No new messages.");
+      }
+    }
+  });
+
+exports.updateReview = functions.firestore
+  .document("post/{postId}")
+  .onCreate(async (snapshot, context) => {
+    const postData = snapshot.data();
+
+    if (!postData || !postData.rating) {
+      console.log("Rating is not available or not a number. Exiting function.");
+      return null;
+    }
+
+    const { bookId, rating } = postData;
+
+    const bookRef = admin.firestore().collection("book").doc(bookId);
+
+    try {
+      const bookDoc = await bookRef.get();
+
+      if (!bookDoc.exists) {
+        throw new Error("Book document does not exist");
+      }
+
+      const bookData = bookDoc.data();
+
+      const updatedTotalRating = (bookData.totalRating || 0) + rating;
+      const updatedTotalRatingCount = (bookData.totalRatingCount || 0) + 1;
+
+      // Update the book document
+      await bookRef.update({
+        totalRating: updatedTotalRating,
+        totalRatingCount: updatedTotalRatingCount,
+      });
+
+      console.log("Book document updated successfully");
+    } catch (error) {
+      console.error("Error updating book document:", error);
+      throw new Error("Update failed");
+    }
+  });
