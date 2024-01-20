@@ -9,7 +9,7 @@
 
 const { onRequest } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
-
+const stripe = require('stripe')('sk_test_51OacRkBAoDiFLBXwJw5Pg3ujPQfvSlYXsqAqrVflNlcO5aANsFpC6JituNYFLc6Yi9e2cseqY2QBelXzifgD1fGg00AiXWcdxD');
 // functions/index.js
 
 const functions = require("firebase-functions");
@@ -115,4 +115,79 @@ exports.updateReview = functions.firestore
       console.error("Error updating book document:", error);
       throw new Error("Update failed");
     }
+  });
+
+exports.createPaymentIntent = functions.https.onRequest(async (req, res) => {
+  // Use an existing Customer ID if this is a returning customer.
+  const customer = await stripe.customers.create();
+  const ephemeralKey = await stripe.ephemeralKeys.create(
+    { customer: customer.id },
+    { apiVersion: '2023-10-16' }
+  );
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: 1099,
+    currency: 'usd',
+    customer: customer.id,
+    // In the latest version of the API, specifying the `automatic_payment_methods` parameter is optional because Stripe enables its functionality by default.
+    automatic_payment_methods: {
+      enabled: true,
+    },
+  });
+
+  res.json({
+    paymentIntent: paymentIntent.client_secret,
+    ephemeralKey: ephemeralKey.secret,
+    customer: customer.id,
+    publishableKey: 'pk_test_51OacRkBAoDiFLBXw3m5QAZhwJwX3kqnYqNBMxa9ZPqkCbGWumFwlsysuvCXCeBMgoDFkrdbHMIeYI4Vx3sPk0m9T00VkLoUMAP'
+  });
+});
+
+exports.sendNotificationOnPostCreation = functions.firestore
+  .document('posts/{postId}')
+  .onCreate(async (snap, context) => {
+    // Get the new post document
+    const newPost = snap.data();
+
+    // Extract userId from the new post
+    const userId = newPost.userId;
+
+    const postOwner = await admin
+      .firestore()
+      .collection("user")
+      .doc(userId)
+      .get();
+
+    const taggedBook = await admin
+      .firestore()
+      .collection("book")
+      .doc(newPost.bookId)
+      .get();
+
+    // Construct the topic using userId
+    const topic = `user_${userId}_posts`;
+
+    // Notification payload
+    const payload = {
+      notification: {
+        title: `${postOwner.data().name} just posted a new review for ${taggedBook.data().title}`,
+        body: newPost.title,
+        // You can customize other notification properties here
+      },
+      android: {
+        notification: {
+          imageUrl: taggedBook.imageUrl,
+        }
+      },
+    };
+
+    // Send the notification to the constructed topic
+    return admin.messaging().sendToTopic(topic, payload)
+      .then((response) => {
+        console.log('Notification sent successfully:', response);
+        return null;
+      })
+      .catch((error) => {
+        console.error('Error sending notification:', error);
+        return null;
+      });
   });
