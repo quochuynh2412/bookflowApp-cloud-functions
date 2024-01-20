@@ -137,7 +137,7 @@ exports.updateReview = functions.firestore
     const payload = {
       notification: {
         title: `${postOwner.data().name} just posted a new review for ${taggedBook.data().title}`,
-        body: newPost.title,
+        body: postData.title,
         // You can customize other notification properties here
       },
       android: {
