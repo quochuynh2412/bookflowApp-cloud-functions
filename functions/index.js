@@ -115,41 +115,8 @@ exports.updateReview = functions.firestore
       console.error("Error updating book document:", error);
       throw new Error("Update failed");
     }
-  });
-
-exports.createPaymentIntent = functions.https.onRequest(async (req, res) => {
-  // Use an existing Customer ID if this is a returning customer.
-  const customer = await stripe.customers.create();
-  const ephemeralKey = await stripe.ephemeralKeys.create(
-    { customer: customer.id },
-    { apiVersion: '2023-10-16' }
-  );
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount: 1099,
-    currency: 'usd',
-    customer: customer.id,
-    // In the latest version of the API, specifying the `automatic_payment_methods` parameter is optional because Stripe enables its functionality by default.
-    automatic_payment_methods: {
-      enabled: true,
-    },
-  });
-
-  res.json({
-    paymentIntent: paymentIntent.client_secret,
-    ephemeralKey: ephemeralKey.secret,
-    customer: customer.id,
-    publishableKey: 'pk_test_51OacRkBAoDiFLBXw3m5QAZhwJwX3kqnYqNBMxa9ZPqkCbGWumFwlsysuvCXCeBMgoDFkrdbHMIeYI4Vx3sPk0m9T00VkLoUMAP'
-  });
-});
-
-exports.sendNotificationOnPostCreation = functions.firestore
-  .document('posts/{postId}')
-  .onCreate(async (snap, context) => {
-    // Get the new post document
-    const newPost = snap.data();
-
     // Extract userId from the new post
-    const userId = newPost.userId;
+    const userId = postData.userId;
 
     const postOwner = await admin
       .firestore()
@@ -160,7 +127,7 @@ exports.sendNotificationOnPostCreation = functions.firestore
     const taggedBook = await admin
       .firestore()
       .collection("book")
-      .doc(newPost.bookId)
+      .doc(postData.bookId)
       .get();
 
     // Construct the topic using userId
@@ -191,3 +158,28 @@ exports.sendNotificationOnPostCreation = functions.firestore
         return null;
       });
   });
+
+exports.createPaymentIntent = functions.https.onRequest(async (req, res) => {
+  // Use an existing Customer ID if this is a returning customer.
+  const customer = await stripe.customers.create();
+  const ephemeralKey = await stripe.ephemeralKeys.create(
+    { customer: customer.id },
+    { apiVersion: '2023-10-16' }
+  );
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: 1099,
+    currency: 'usd',
+    customer: customer.id,
+    // In the latest version of the API, specifying the `automatic_payment_methods` parameter is optional because Stripe enables its functionality by default.
+    automatic_payment_methods: {
+      enabled: true,
+    },
+  });
+
+  res.json({
+    paymentIntent: paymentIntent.client_secret,
+    ephemeralKey: ephemeralKey.secret,
+    customer: customer.id,
+    publishableKey: 'pk_test_51OacRkBAoDiFLBXw3m5QAZhwJwX3kqnYqNBMxa9ZPqkCbGWumFwlsysuvCXCeBMgoDFkrdbHMIeYI4Vx3sPk0m9T00VkLoUMAP'
+  });
+});
