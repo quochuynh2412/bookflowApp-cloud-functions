@@ -14,8 +14,10 @@ const stripe = require('stripe')('sk_test_51OacRkBAoDiFLBXwJw5Pg3ujPQfvSlYXsqAqr
 
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
-admin.initializeApp();
+const { getStorage, getDownloadURL } = require('firebase-admin/storage');
 
+admin.initializeApp();
+const storage = getStorage();
 exports.sendNotificationOnUpdate = functions.firestore
   .document("messages/{messageId}")
   .onUpdate(async (change, context) => {
@@ -81,82 +83,105 @@ exports.sendNotificationOnUpdate = functions.firestore
 exports.updateReview = functions.firestore
   .document("post/{postId}")
   .onCreate(async (snapshot, context) => {
-    const postData = snapshot.data();
-
-    if (!postData || !postData.rating) {
-      console.log("Rating is not available or not a number. Exiting function.");
-      return null;
-    }
-
-    const { bookId, rating } = postData;
-
-    const bookRef = admin.firestore().collection("book").doc(bookId);
-
     try {
-      const bookDoc = await bookRef.get();
+      const postData = snapshot.data();
+
+      if (!postData || !postData.rating) {
+        console.log("Rating is not available or not a number. Exiting function.");
+        return null;
+      }
+
+      const { bookId, rating, userId, title } = postData;
+
+      const [bookDoc, postOwner] = await Promise.all([
+        admin.firestore().collection("book").doc(bookId).get(),
+        admin.firestore().collection("user").doc(userId).get(),
+      ]);
 
       if (!bookDoc.exists) {
         throw new Error("Book document does not exist");
       }
 
       const bookData = bookDoc.data();
-
       const updatedTotalRating = (bookData.totalRating || 0) + rating;
       const updatedTotalRatingCount = (bookData.totalRatingCount || 0) + 1;
 
       // Update the book document
-      await bookRef.update({
+      await admin.firestore().collection("book").doc(bookId).update({
         totalRating: updatedTotalRating,
         totalRatingCount: updatedTotalRatingCount,
       });
 
       console.log("Book document updated successfully");
-    } catch (error) {
-      console.error("Error updating book document:", error);
-      throw new Error("Update failed");
-    }
-    // Extract userId from the new post
-    const userId = postData.userId;
 
-    const postOwner = await admin
-      .firestore()
-      .collection("user")
-      .doc(userId)
-      .get();
+      // Construct the topic using userId
+      const topic = `user_${userId}_posts`;
 
-    const taggedBook = await admin
-      .firestore()
-      .collection("book")
-      .doc(postData.bookId)
-      .get();
+      const fileRef = getStorage().bucket('striking-water-408603.appspot.com').file(bookData.imageId);
+      const downloadURL = await getDownloadURL(fileRef);
 
-    // Construct the topic using userId
-    const topic = `user_${userId}_posts`;
-
-    // Notification payload
-    const payload = {
-      notification: {
-        title: `${postOwner.data().name} just posted a new review for ${taggedBook.data().title}`,
-        body: postData.title,
-        // You can customize other notification properties here
-      },
-      android: {
+      // Notification payload
+      const payload = {
         notification: {
-          imageUrl: taggedBook.imageUrl,
-        }
-      },
-    };
+          title: `${postOwner.data().name} just posted a new review for ${bookData.title}`,
+          body: title,
+          image: downloadURL || "https://www.marytribble.com/wp-content/uploads/2020/12/book-cover-placeholder.png",
+          // You can customize other notification properties here
+        },
+        data: {
+          imageUrl: downloadURL || "https://www.marytribble.com/wp-content/uploads/2020/12/book-cover-placeholder.png",
+        },
+      };
 
-    // Send the notification to the constructed topic
-    return admin.messaging().sendToTopic(topic, payload)
-      .then((response) => {
-        console.log('Notification sent successfully:', response);
+      // Send the notification to the constructed topic
+      await admin.messaging().sendToTopic(topic, payload);
+      console.log('Notification sent successfully');
+    } catch (error) {
+      console.error('Error:', error);
+      throw new Error('Update failed');
+    }
+
+    return null;
+  });
+
+exports.deleteReview = functions.firestore
+  .document("post/{postId}")
+  .onDelete(async (snapshot, context) => {
+    try {
+      const deletedPostData = snapshot.data();
+
+      if (!deletedPostData || !deletedPostData.rating) {
+        console.log("Rating is not available or not a number. Exiting function.");
         return null;
-      })
-      .catch((error) => {
-        console.error('Error sending notification:', error);
-        return null;
+      }
+
+      const { bookId, rating, userId } = deletedPostData;
+
+      const [bookDoc] = await Promise.all([
+        admin.firestore().collection("book").doc(bookId).get(),
+      ]);
+
+      if (!bookDoc.exists) {
+        throw new Error("Book document does not exist");
+      }
+
+      const bookData = bookDoc.data();
+      const updatedTotalRating = (bookData.totalRating || 0) - rating;
+      const updatedTotalRatingCount = (bookData.totalRatingCount || 0) - 1;
+
+      // Update the book document
+      await admin.firestore().collection("book").doc(bookId).update({
+        totalRating: updatedTotalRating,
+        totalRatingCount: updatedTotalRatingCount,
       });
+
+      console.log("Book document updated successfully due to review deletion");
+    } catch (error) {
+      console.error('Error:', error);
+      throw new Error('Update failed');
+    }
+
+    return null;
   });
 
 exports.createPaymentIntent = functions.https.onRequest(async (req, res) => {
